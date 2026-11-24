@@ -103,8 +103,8 @@ To install the agent skill, copy `skills/telegram-reader` into
 
 | Tool | Inputs | Defaults and limits |
 | --- | --- | --- |
-| `list_chats` | Optional `name` substring and `limit` | 12 chats, maximum 40. Search a person's full name or surname, a chat title, or a username. If `more` is true, narrow the name filter. |
-| `read_messages` | `chat_id` with optional `query`, `before_id`, or `text_cursor`. For personal search, use `chat_type: "personal"` with a required `query`. Both modes accept `limit`. | 8 messages by default. Both modes allow up to 50 messages within a 48 KiB encoded result. |
+| `list_chats` | Optional `name` substring and `limit` | 20 chats, maximum 40. Search a person's full name or surname, a chat title, or a username. If `more` is true, narrow the name filter. |
+| `read_messages` | `chat_id` with optional `query`, `before_id`, or `text_cursor`. For personal search, use `chat_type: "personal"` with a required `query`. Both modes accept `limit`. | History without a query defaults to 100, also its maximum. Keyword searches default to 20 and allow up to 50. The 48 KiB encoded result budget can shorten a page. |
 
 Filtered or allowlisted discovery checks at most the first 100 dialogs in one
 Telegram page. `partial: true` means the scan reached its dialog limit and
@@ -116,6 +116,8 @@ the requested limit plus one lookahead.
 With no query, `read_messages` reads recent history. With a query, Telegram
 performs the search and may match related forms of a term. Use
 `next_before_id` as `before_id` with the same chat and query for older results.
+A full 100-message history page can use a second Telegram request for one
+lookahead row to determine whether older results exist.
 Single-chat results return Telegram's full plain text or caption, with a
 48 KiB cap on the JSON-encoded MCP tool result including escaping and content
 metadata. A page may contain fewer messages than requested. If one message
@@ -134,7 +136,7 @@ If you remember a keyword but have forgotten the contact, call `read_messages`
 with the following arguments.
 
 ```json
-{"chat_type":"personal","query":"invoice","limit":8}
+{"chat_type":"personal","query":"invoice"}
 ```
 
 Personal matches include `chat_id`, `chat_name`, message `id`, `date`, and

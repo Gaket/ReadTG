@@ -15,7 +15,10 @@ use crate::telegram::Telegram;
 
 const CLOSED: &str = "Chat access is closed. Check the local Telegram sign-in and TELEGRAM_ALLOWED_CHATS before restarting the MCP server.";
 const CHAT_LIMIT: usize = 40;
-const MESSAGE_LIMIT: usize = 50;
+const CHAT_DEFAULT: usize = 20;
+const HISTORY_LIMIT: usize = 100;
+const SEARCH_DEFAULT: usize = 20;
+const SEARCH_LIMIT: usize = 50;
 pub const TITLE_CHARS: usize = 96;
 
 pub enum Scope {
@@ -99,7 +102,7 @@ pub struct ChatRequest {
         length(max = 100)
     )]
     pub name: Option<String>,
-    #[schemars(description = "Defaults to 12.", range(min = 1, max = 40))]
+    #[schemars(description = "Defaults to 20.", range(min = 1, max = 40))]
     pub limit: Option<usize>,
 }
 
@@ -112,7 +115,7 @@ impl ChatRequest {
     pub fn validate(self) -> Result<ChatParams> {
         Ok(ChatParams {
             name: search_text(self.name, "name", 100)?.map(|name| name.to_lowercase()),
-            limit: bounded(self.limit, 12, CHAT_LIMIT, "limit")?,
+            limit: bounded(self.limit, CHAT_DEFAULT, CHAT_LIMIT, "limit")?,
         })
     }
 }
@@ -147,7 +150,10 @@ struct MessageRequest {
         description = "Copy next_text_cursor to continue a split message with the same chat and query. Omit before_id."
     )]
     text_cursor: Option<TextCursor>,
-    #[schemars(description = "Defaults to 8. Maximum 50.", range(min = 1, max = 50))]
+    #[schemars(
+        description = "Defaults to 100 for history without a query and 20 for keyword searches. Maximum 100 for history and 50 for searches.",
+        range(min = 1, max = 100)
+    )]
     limit: Option<usize>,
 }
 
@@ -181,7 +187,7 @@ impl MessageRequest {
             }
             let query = search_text(self.query, "query", 160)?
                 .context("A query is required for personal search.")?;
-            let limit = bounded(self.limit, 8, MESSAGE_LIMIT, "limit")?;
+            let limit = bounded(self.limit, SEARCH_DEFAULT, SEARCH_LIMIT, "limit")?;
             return Ok(ReadParams::Personal { query, limit });
         }
 
@@ -201,12 +207,18 @@ impl MessageRequest {
             }
         }
 
+        let query = search_text(self.query, "query", 160)?;
+        let limit = if query.is_some() {
+            bounded(self.limit, SEARCH_DEFAULT, SEARCH_LIMIT, "limit")?
+        } else {
+            bounded(self.limit, HISTORY_LIMIT, HISTORY_LIMIT, "limit")?
+        };
         Ok(ReadParams::Chat(MessageParams {
             peer,
-            query: search_text(self.query, "query", 160)?,
+            query,
             before_id: self.before_id.unwrap_or(0),
             text_cursor: self.text_cursor,
-            limit: bounded(self.limit, 8, MESSAGE_LIMIT, "limit")?,
+            limit,
         }))
     }
 }
@@ -365,6 +377,19 @@ mod tests {
     }
 
     #[test]
+    fn chat_discovery_defaults_to_twenty_and_still_caps_at_forty() {
+        let request = |json| {
+            serde_json::from_str::<ChatRequest>(json)
+                .unwrap()
+                .validate()
+        };
+        assert_eq!(request("{}").unwrap().limit, 20);
+        assert_eq!(request(r#"{"name":"Ana"}"#).unwrap().limit, 20);
+        assert_eq!(request(r#"{"limit":40}"#).unwrap().limit, 40);
+        assert!(request(r#"{"limit":41}"#).is_err());
+    }
+
+    #[test]
     fn validates_message_requests_before_the_telegram_call() {
         let scope = Scope::parse("123").unwrap();
         let request = |json: &str| {
@@ -377,8 +402,23 @@ mod tests {
         };
         assert_eq!(
             (default.limit, default.before_id, default.query),
-            (8, 0, None)
+            (100, 0, None)
         );
+        for (json, expected) in [
+            (r#"{"chat_id":"123","before_id":150}"#, 100),
+            (r#"{"chat_id":"123","limit":100}"#, 100),
+            (r#"{"chat_id":"123","query":"invoices"}"#, 20),
+            (
+                r#"{"chat_id":"123","query":"invoices","before_id":150}"#,
+                20,
+            ),
+            (r#"{"chat_id":"123","query":"invoices","limit":50}"#, 50),
+        ] {
+            let ReadParams::Chat(params) = request(json).unwrap() else {
+                panic!("expected single-chat mode");
+            };
+            assert_eq!(params.limit, expected, "{json}");
+        }
         let ReadParams::Chat(search) =
             request(r#"{"chat_id":"123","query":"  invoices ","before_id":10,"limit":2}"#).unwrap()
         else {
@@ -400,7 +440,8 @@ mod tests {
             r#"{"chat_id":"-123"}"#,
             r#"{"chat_id":"123","before_id":0}"#,
             r#"{"chat_id":"123","limit":0}"#,
-            r#"{"chat_id":"123","limit":51}"#,
+            r#"{"chat_id":"123","limit":101}"#,
+            r#"{"chat_id":"123","query":"invoices","limit":51}"#,
             r#"{"chat_id":"123","query":" "}"#,
             r#"{"chat_id":"123","before_id":10,"text_cursor":{"message_id":9,"byte_offset":1}}"#,
             r#"{"chat_id":"123","text_cursor":{"message_id":0,"byte_offset":1}}"#,
@@ -424,6 +465,12 @@ mod tests {
             panic!("expected personal search");
         };
         assert_eq!((query.as_str(), limit), ("invoices", 50));
+        let ReadParams::Personal { limit, .. } =
+            request(r#"{"chat_type":"personal","query":"invoices"}"#).unwrap()
+        else {
+            panic!("expected personal search");
+        };
+        assert_eq!(limit, 20);
         for json in [
             r#"{"chat_type":"personal"}"#,
             r#"{"chat_type":"personal","query":" "}"#,

@@ -834,14 +834,16 @@ mod tests {
     }
 
     #[test]
-    fn count_cutoff_uses_last_returned_message_and_can_return_fifty() {
-        let mut page = MessagePageBuilder::new(50, None);
-        for id in (2..=51).rev() {
-            assert!(page.push(message_row(id), "").unwrap());
+    fn count_cutoff_uses_last_returned_message_and_can_return_one_hundred() {
+        let mut page = MessagePageBuilder::new(100, None);
+        for id in (2..=101).rev() {
+            let mut row = message_row(id);
+            row.sender = None;
+            assert!(page.push(row, "short").unwrap());
         }
         assert!(!page.push(message_row(1), "").unwrap());
         let page = page.finish().unwrap();
-        assert_eq!(page.messages.len(), 50);
+        assert_eq!(page.messages.len(), 100);
         assert_eq!(page.next_before_id, Some(2));
         assert!(page.next_text_cursor.is_none());
         assert_encoded_budget(page);
@@ -850,7 +852,7 @@ mod tests {
     #[test]
     fn byte_cutoff_resumes_at_the_first_omitted_message() {
         let text = "猫🌊\"\\\n\r\t\u{8}\u{c}\0\u{1f}".repeat(750);
-        let mut first = MessagePageBuilder::new(8, None);
+        let mut first = MessagePageBuilder::new(100, None);
         assert!(first.push(message_row(9), &text).unwrap());
         assert!(!first.push(message_row(8), &text).unwrap());
         let first = first.finish().unwrap();
@@ -858,7 +860,7 @@ mod tests {
         assert_eq!(first.messages[0].text, text);
         assert_encoded_budget(first);
 
-        let mut second = MessagePageBuilder::new(8, None);
+        let mut second = MessagePageBuilder::new(100, None);
         assert!(second.push(message_row(8), &text).unwrap());
         assert!(second.push(message_row(7), "older").unwrap());
         let second = second.finish().unwrap();

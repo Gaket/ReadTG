@@ -188,7 +188,10 @@ def smoke(binary, idle_seconds):
                 assert tool["annotations"]["readOnlyHint"] is True
                 assert tool["annotations"]["destructiveHint"] is False
             read_inputs = tools["read_messages"]["inputSchema"]["properties"]
-            assert read_inputs["limit"]["maximum"] == 50
+            assert read_inputs["limit"]["maximum"] == 100
+            assert "20 for keyword searches" in read_inputs["limit"]["description"]
+            chat_limit = tools["list_chats"]["inputSchema"]["properties"]["limit"]
+            assert chat_limit["maximum"] == 40 and chat_limit["description"] == "Defaults to 20."
             assert "before_id" in read_inputs and "text_cursor" in read_inputs
             first.verify_closed("list_chats", {})
             second.verify_closed("read_messages", {"chat_id": "123", "query": "word"})
